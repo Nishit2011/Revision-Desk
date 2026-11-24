@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { BetaContentBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { z } from "zod";
 import { config, type Effort } from "../config.ts";
 
@@ -15,7 +16,7 @@ export class AgentError extends Error {
 }
 
 /** Shared ground rules every agent follows. Kept byte-stable so it stays in the prompt cache. */
-const TEAM_RULES = `You are one agent in Revision Desk, a team of agents that turns transcripts (lectures, classes, talks, podcasts, meetings) into revision notes for students.
+const TEAM_RULES = `You are one agent in Revision Desk, a team of agents that turns transcripts (lectures, classes, talks, podcasts, meetings), plus any slides and images the student uploads, into revision notes for students.
 
 House style for everything you write:
 - Plain, simple language: short sentences and everyday words. Explain any jargon the first time it appears.
@@ -28,8 +29,8 @@ export interface AgentCall<Schema extends z.ZodType> {
   agent: string;
   /** Large, reusable source material (usually the transcript). Placed in the cached system prefix. */
   context: string;
-  /** The specific job for this call. */
-  task: string;
+  /** The specific job for this call: text, or content blocks when images are included. */
+  task: string | BetaContentBlockParam[];
   schema: Schema;
   signal?: AbortSignal;
   effort?: Effort;

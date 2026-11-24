@@ -19,6 +19,8 @@ export function sectionWriterAgent(
   plan: PlannedSection,
   allHeadings: string[],
   signal?: AbortSignal,
+  /** Slides or images assigned to this section by the placement agent, as text. */
+  assignedMaterial = "",
 ): Promise<WrittenSection> {
   return runAgent({
     agent: "section-writer",
@@ -32,7 +34,11 @@ What it covers: ${plan.focus}
 
 The full set of sections (other writers handle the rest, so don't cover their material):
 ${allHeadings.map((h, i) => `${i + 1}. ${h}`).join("\n")}
-
+${
+  assignedMaterial
+    ? `\nThe student's slides and images for this section (use their facts, labels and examples; their pictures will appear next to your text):\n${assignedMaterial}\n`
+    : ""
+}
 Write:
 - explanation: 2-3 short paragraphs in plain language that explain the idea step by step. Wrap 1-3 key terms in **double asterisks**.
 - keyPoints: 3-5 short points to revise from.

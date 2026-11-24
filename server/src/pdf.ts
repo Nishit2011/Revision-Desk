@@ -1,7 +1,20 @@
 import puppeteer, { type Browser } from "puppeteer";
-import { DIAGRAM_LABEL, esc, formatDate, LIGHT_PALETTE, paragraphs, renderDiagramSvg, rich, type Note } from "@revision-desk/shared";
+import { DIAGRAM_LABEL, esc, formatDate, LIGHT_PALETTE, paragraphs, renderDiagramSvg, rich, type Figure, type Note } from "@revision-desk/shared";
+import { assetsRepo } from "./db.ts";
 
 const paras = (s: string) => paragraphs(s).map((p) => `<p>${rich(p)}</p>`).join("");
+
+/** Images placed in a section, embedded as data URIs so the PDF is self-contained. */
+function figuresHtml(figures: Figure[] = []): string {
+  return figures
+    .map((f) => {
+      const asset = assetsRepo.get(f.assetId);
+      if (!asset) return "";
+      const src = `data:${asset.mime};base64,${Buffer.from(asset.data).toString("base64")}`;
+      return `<figure class="photo"><img src="${src}" alt="${esc(f.caption)}"><figcaption>${esc(f.caption)} <span>· ${esc(f.source)}</span></figcaption></figure>`;
+    })
+    .join("");
+}
 
 /** A print-ready HTML document for the notes. */
 export function notesToPrintHtml(note: Note): string {
@@ -17,6 +30,7 @@ export function notesToPrintHtml(note: Note): string {
           ? `<figure>${renderDiagramSvg(s.diagram, LIGHT_PALETTE)}<figcaption><b>${DIAGRAM_LABEL[s.diagram.type]}</b> ${esc(s.diagram.title)}</figcaption></figure>`
           : ""
       }
+      ${figuresHtml(s.figures)}
       <div class="grid">
         ${s.keyPoints.length ? `<div class="card"><h3>Key points</h3><ul>${s.keyPoints.map((p) => `<li>${rich(p)}</li>`).join("")}</ul></div>` : ""}
         ${s.example ? `<div class="card ex"><h3>Example</h3>${paras(s.example)}</div>` : ""}
@@ -29,7 +43,8 @@ export function notesToPrintHtml(note: Note): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(note.title)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&display=swap">
 <style>
-  body{font-family:"Atkinson Hyperlegible","Segoe UI",system-ui,sans-serif;color:#18202C;font-size:11pt;line-height:1.55;margin:0}
+  html{background:#FFFFFF}
+  body{background:#FFFFFF;font-family:"Atkinson Hyperlegible","Segoe UI",system-ui,sans-serif;color:#18202C;font-size:11pt;line-height:1.55;margin:0}
   h1,h2,h3{font-family:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;line-height:1.15;margin:0}
   h1{font-size:26pt;font-weight:800} h2{font-size:16pt;margin:2pt 0 8pt} h3{font-size:11pt;margin-bottom:4pt}
   .meta{font-size:8.5pt;letter-spacing:.08em;text-transform:uppercase;color:#4F5A6B}
@@ -43,6 +58,8 @@ export function notesToPrintHtml(note: Note): string {
   figure{margin:10pt 0;border:1px solid #D5DBE5;border-radius:8pt;padding:8pt;break-inside:avoid}
   figure svg{width:100%;height:auto;display:block}
   figcaption{font-size:9pt;color:#4F5A6B;margin-top:4pt}
+  figure.photo img{display:block;max-width:100%;max-height:120mm;margin:0 auto;border-radius:4pt}
+  figure.photo figcaption span{color:#8A94A6}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:8pt}
   .card{border:1px solid #D5DBE5;border-radius:8pt;padding:8pt 10pt;break-inside:avoid}
   .card.ex{background:#EEF1F6;border-color:#EEF1F6} .card p{margin:0 0 4pt} .card ul{margin:0;padding-left:14pt}

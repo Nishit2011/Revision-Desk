@@ -25,7 +25,7 @@ export function outlineAgent(transcript: string, signal?: AbortSignal): Promise<
     context: transcript,
     schema: Outline,
     signal,
-    task: `You are the OUTLINE agent. The source material is a full transcript.
+    task: `You are the OUTLINE agent. The source material is a full transcript, possibly followed by the student's slides and images (described in text). If there is no transcript, plan from the slides and images alone.
 
 Plan the revision notes:
 - title: a short heading title for the whole transcript.
@@ -55,7 +55,7 @@ export async function outlineNewContentAgent(
     context: newContent,
     schema: NewSections,
     signal,
-    task: `You are the OUTLINE agent, extending existing notes. The source material is NEW transcript content that continues a transcript already turned into notes.
+    task: `You are the OUTLINE agent, extending existing notes. The source material is NEW material (more transcript text and/or descriptions of uploaded slides and images) that continues a transcript already turned into notes.
 
 Existing notes: "${existing.title}"
 Existing sections:

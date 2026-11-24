@@ -1,17 +1,52 @@
-import { Router, type Request, type Response } from "express";
-import { CreateNoteRequest, ExtendNoteRequest, UpdateNoteRequest, type ProgressEvent } from "@revision-desk/shared";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import multer from "multer";
+import {
+  CreateNoteRequest,
+  ExtendNoteRequest,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_FILES,
+  UpdateNoteRequest,
+  type ProgressEvent,
+} from "@revision-desk/shared";
 import { createNotes, extendNotes, type PipelineResult } from "../agents/orchestrator.ts";
 import { AgentError } from "../agents/llm.ts";
-import { notesRepo } from "../db.ts";
+import { notesRepo, saveNoteWithAssets } from "../db.ts";
+import { emptyUploads, processUploads, type ProcessedUploads } from "../materials.ts";
 import { renderNotesPdf } from "../pdf.ts";
 
 export const notesRouter = Router();
 
+/** Slide decks and images arrive as multipart "files" alongside the text fields. */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_UPLOAD_FILES } });
+const acceptFiles = (req: Request, res: Response, next: NextFunction) =>
+  upload.array("files", MAX_UPLOAD_FILES)(req, res, (err: unknown) => {
+    if (!err) return next();
+    const message =
+      err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE"
+        ? `Each file must be under ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`
+        : err instanceof multer.MulterError && (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE")
+          ? `Upload at most ${MAX_UPLOAD_FILES} files at a time.`
+          : "The upload couldn't be read. Try again.";
+    res.status(400).json({ error: message });
+  });
+
+const uploadedFiles = (req: Request) =>
+  ((req.files as Express.Multer.File[] | undefined) ?? []).map((f) => ({
+    // Browsers send UTF-8 names, which multer reads as latin1.
+    originalname: Buffer.from(f.originalname, "latin1").toString("utf8"),
+    buffer: f.buffer,
+  }));
+
 /**
  * Run an agent workflow and stream its progress to the browser as Server-Sent Events.
- * If the browser disconnects (the user pressed Cancel), the agents are aborted and nothing is saved.
+ * Uploaded files are unpacked first. If the browser disconnects (the user pressed Cancel),
+ * the agents are aborted and nothing is saved.
  */
-async function streamWorkflow(res: Response, run: (emit: (ev: ProgressEvent) => void, signal: AbortSignal) => Promise<PipelineResult>) {
+async function streamWorkflow(
+  req: Request,
+  res: Response,
+  run: (uploads: ProcessedUploads, emit: (ev: ProgressEvent) => void, signal: AbortSignal) => Promise<PipelineResult>,
+) {
   res.status(200).set({
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -29,14 +64,22 @@ async function streamWorkflow(res: Response, run: (emit: (ev: ProgressEvent) => 
   };
   const heartbeat = setInterval(() => !res.writableEnded && res.write(": keep-alive\n\n"), 15_000);
 
+  let uploads = emptyUploads();
   try {
-    const result = await run(send, ctrl.signal);
+    const files = uploadedFiles(req);
+    if (files.length) {
+      send({ type: "stage", agent: "files", message: `Opening ${files.length} uploaded file${files.length > 1 ? "s" : ""}…` });
+      uploads = await processUploads(files);
+    }
+    const result = await run(uploads, send, ctrl.signal);
     if (ctrl.signal.aborted) return;
-    notesRepo.save(result.note);
-    send({ type: "done", note: result.note, focusSectionId: result.focusSectionId, summary: result.summary });
+    saveNoteWithAssets(result.note, result.assets);
+    send({ type: "done", note: result.note, focusSectionId: result.focusSectionId, summary: result.summary, warnings: result.warnings });
   } catch (err) {
     if (!ctrl.signal.aborted) {
-      send({ type: "error", message: err instanceof AgentError ? err.message : "Something went wrong. Nothing was changed. Try again." });
+      const base = err instanceof AgentError ? err.message : "Something went wrong. Nothing was changed. Try again.";
+      // Say why uploaded files were skipped, since that is often the reason there was nothing to use.
+      send({ type: "error", message: [base, ...uploads.warnings].join(" ") });
       if (!(err instanceof AgentError)) console.error(err);
     }
   } finally {
@@ -59,19 +102,19 @@ notesRouter.get("/:id", (req, res) => {
   res.json(note);
 });
 
-notesRouter.post("/", async (req: Request, res: Response) => {
-  const parsed = CreateNoteRequest.safeParse(req.body);
-  if (!parsed.success) return badRequest(res, "Send a transcript to turn into notes.");
-  await streamWorkflow(res, (emit, signal) => createNotes(parsed.data, emit, signal));
+notesRouter.post("/", acceptFiles, async (req: Request, res: Response) => {
+  const parsed = CreateNoteRequest.safeParse(req.body ?? {});
+  if (!parsed.success) return badRequest(res, "Send a transcript, or slides and images, to turn into notes.");
+  await streamWorkflow(req, res, (uploads, emit, signal) => createNotes(parsed.data, uploads, emit, signal));
 });
 
-notesRouter.post("/:id/extend", async (req: Request, res: Response) => {
+notesRouter.post("/:id/extend", acceptFiles, async (req: Request, res: Response) => {
   const note = notesRepo.get(String(req.params.id));
   if (!note) return void res.status(404).json({ error: "These notes don't exist any more." });
-  const parsed = ExtendNoteRequest.safeParse(req.body);
-  if (!parsed.success) return badRequest(res, "Choose how to add the content: new sections, continue a section, or rebuild.");
+  const parsed = ExtendNoteRequest.safeParse(req.body ?? {});
+  if (!parsed.success) return badRequest(res, "Choose how to add the material.");
   if (parsed.data.mode === "continue" && !parsed.data.sectionId) return badRequest(res, "Pick the section to continue.");
-  await streamWorkflow(res, (emit, signal) => extendNotes(note, parsed.data, emit, signal));
+  await streamWorkflow(req, res, (uploads, emit, signal) => extendNotes(note, parsed.data, uploads, emit, signal));
 });
 
 notesRouter.patch("/:id", (req, res) => {

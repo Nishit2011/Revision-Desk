@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { formatDate, type Note, type Section } from "@revision-desk/shared";
+import { formatDate, type Figure, type Note, type Section } from "@revision-desk/shared";
 import { api } from "../api.ts";
 import { AddPanel } from "./AddPanel.tsx";
 import { DiagramView } from "./DiagramView.tsx";
@@ -8,6 +8,25 @@ import { Paragraphs, Rich } from "./Rich.tsx";
 function scrollToId(id: string) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.getElementById(id)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+}
+
+function Figures({ figures }: { figures: Figure[] }) {
+  if (!figures.length) return null;
+  return (
+    <div className={`figures${figures.length > 1 ? " two" : ""}`}>
+      {figures.map((f) => (
+        <figure key={f.assetId} className="photo">
+          <a href={api.assetUrl(f.assetId)} target="_blank" rel="noreferrer">
+            <img src={api.assetUrl(f.assetId)} alt={f.caption} loading="lazy" />
+          </a>
+          <figcaption>
+            <span>{f.caption}</span>
+            <span className="src">{f.source}</span>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
 }
 
 function SectionView({ section, index, total }: { section: Section; index: number; total: number }) {
@@ -24,6 +43,7 @@ function SectionView({ section, index, total }: { section: Section; index: numbe
         </div>
       </div>
       {section.diagram && <DiagramView diagram={section.diagram} />}
+      <Figures figures={section.figures ?? []} />
       <div className="grid2">
         {section.keyPoints.length > 0 && (
           <div className="card">
@@ -137,12 +157,23 @@ export function NoteView({
           <h1>{note.title}</h1>
         )}
         {note.subtitle && <p className="subtitle">{note.subtitle}</p>}
+        {(note.attachments?.length ?? 0) > 0 && (
+          <p className="sources">
+            <span className="label">Also from</span>
+            {note.attachments!.map((a) => (
+              <span key={a.id} className="source-chip">
+                {a.name}
+                {a.kind === "pptx" ? ` · ${a.itemCount} slide${a.itemCount === 1 ? "" : "s"}` : ""}
+              </span>
+            ))}
+          </p>
+        )}
         <div className="actions">
           <a className="btn primary" href={api.pdfUrl(note.id)} download>
             Export PDF
           </a>
           <button type="button" className="btn" aria-expanded={adding} aria-controls="addPanel" onClick={() => setAdding((a) => !a)}>
-            + Add to transcript
+            + Add transcript, slides or images
           </button>
           <button type="button" className="btn" onClick={() => { setTitleDraft(note.title); setRenaming(true); }}>
             Rename
@@ -157,11 +188,11 @@ export function NoteView({
         <AddPanel
           note={note}
           onClose={() => setAdding(false)}
-          onUpdated={(n, focus, summary) => {
+          onUpdated={(n, focus, summary, warnings) => {
             onChanged(n);
             if (summary) {
               setAdding(false);
-              toast(summary);
+              toast([summary, ...(warnings ?? [])].join(" "));
             }
             if (focus) setPendingFocus(focus);
           }}

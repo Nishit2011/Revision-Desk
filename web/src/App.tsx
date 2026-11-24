@@ -28,7 +28,7 @@ export function App() {
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastMsg(""), 3200);
+    toastTimer.current = window.setTimeout(() => setToastMsg(""), msg.length > 80 ? 8000 : 3200);
   }, []);
 
   useEffect(() => {
@@ -99,12 +99,12 @@ export function App() {
           </div>
           {view === "new" && (
             <Composer
-              onCreated={(n) => {
+              onCreated={(n, warnings) => {
                 upsert(n);
                 setCurrentId(n.id);
                 setView("note");
                 window.scrollTo(0, 0);
-                toast("Revision notes ready.");
+                toast(["Revision notes ready.", ...warnings].join(" "));
               }}
             />
           )}

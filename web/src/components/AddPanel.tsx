@@ -2,18 +2,43 @@ import { useEffect, useState } from "react";
 import type { ExtendMode, Note } from "@revision-desk/shared";
 import { api } from "../api.ts";
 import { useJob } from "../useJob.ts";
+import { AttachmentPicker } from "./AttachmentPicker.tsx";
 import { ProgressPanel } from "./ProgressPanel.tsx";
 import { TranscriptInput } from "./TranscriptInput.tsx";
 
 const GO_LABEL: Record<ExtendMode, string> = {
+  auto: "Add to notes",
   new: "Add as new sections",
   continue: "Add to this section",
-  rebuild: "Rebuild all notes",
+  rebuild: "Regenerate everything",
 };
 
+const MODES: { mode: ExtendMode; title: string; body: string }[] = [
+  {
+    mode: "auto",
+    title: "Place it where it fits (recommended)",
+    body: "The agents read the new text, slides and images and add each to the section it belongs in. Anything no section covers becomes a new section. Nothing else is rewritten.",
+  },
+  {
+    mode: "new",
+    title: "As new section(s)",
+    body: "Everything added becomes new sections after the existing ones. Slides and images are placed among those new sections.",
+  },
+  {
+    mode: "continue",
+    title: "Continue one section",
+    body: "Everything added goes to the end of the section you pick. What's already there is kept.",
+  },
+  {
+    mode: "rebuild",
+    title: "Regenerate everything from scratch",
+    body: "Rebuilds every section, diagram, key term and question from the full transcript and all slides and images, including anything added here. This replaces the current notes.",
+  },
+];
+
 /**
- * Add more transcript content to existing notes:
- * as new sections, as a continuation of one section, or (only when chosen) a full rebuild.
+ * Add more transcript text, slides or images to existing notes without regenerating them,
+ * or regenerate everything from scratch when chosen.
  */
 export function AddPanel({
   note,
@@ -22,10 +47,11 @@ export function AddPanel({
 }: {
   note: Note;
   onClose: () => void;
-  onUpdated: (note: Note, focusSectionId?: string, summary?: string) => void;
+  onUpdated: (note: Note, focusSectionId?: string, summary?: string, warnings?: string[]) => void;
 }) {
   const [content, setContent] = useState("");
-  const [mode, setMode] = useState<ExtendMode>("new");
+  const [files, setFiles] = useState<File[]>([]);
+  const [mode, setMode] = useState<ExtendMode>("auto");
   const [sectionId, setSectionId] = useState(note.sections.at(-1)?.id ?? "");
   const [armed, setArmed] = useState(false);
   const [msg, setMsg] = useState("");
@@ -38,20 +64,24 @@ export function AddPanel({
 
   async function go() {
     setMsg("");
-    if (mode !== "rebuild" && content.trim().length < 40) return setMsg("Paste or upload the extra transcript content first.");
+    if (mode !== "rebuild" && content.trim().length < 40 && !files.length) {
+      return setMsg("Paste the extra transcript text or add slides or images first.");
+    }
     if (mode === "rebuild" && !armed) {
       setArmed(true);
-      return setMsg("This replaces every section, key term and question.");
+      return setMsg("This replaces every section, diagram, key term and question.");
     }
     const base = mode === "new" ? note.sections.length : 0;
     const done = await run(
-      (onEvent, signal) => api.extendNotes(note.id, { mode, content, sectionId: mode === "continue" ? sectionId : undefined }, onEvent, signal),
+      (onEvent, signal) =>
+        api.extendNotes(note.id, { mode, content, sectionId: mode === "continue" ? sectionId : undefined }, files, onEvent, signal),
       base,
     );
     setArmed(false);
     if (done) {
       setContent("");
-      onUpdated(done.note, done.focusSectionId, done.summary);
+      setFiles([]);
+      onUpdated(done.note, done.focusSectionId, done.summary, done.warnings);
     }
   }
 
@@ -59,7 +89,7 @@ export function AddPanel({
     try {
       const saved = await api.updateNote(note.id, { transcript: fullTx });
       onUpdated(saved);
-      setTxMsg('Transcript saved. Choose "Rebuild all notes" to update the notes from it.');
+      setTxMsg('Transcript saved. Choose "Regenerate everything from scratch" to update the notes from it.');
     } catch (err) {
       setTxMsg((err as Error).message);
     }
@@ -70,42 +100,42 @@ export function AddPanel({
       <div>
         <h2 className="end-h tight">Add to this transcript</h2>
         <p className="msg">
-          Paste or upload the extra part of the transcript. Only the new part is turned into notes. Everything already here stays as it is.
+          Paste more of the transcript, upload slides or images, or both. Only the new material is turned into notes unless you choose to
+          regenerate everything.
         </p>
       </div>
 
-      <TranscriptInput label="Additional transcript content" value={content} onChange={setContent} minHeight={160} placeholder="Paste the additional transcript content here…" />
+      <TranscriptInput label="Additional transcript content" value={content} onChange={setContent} minHeight={140} placeholder="Paste the additional transcript content here (optional if you add slides or images)…" />
+
+      <AttachmentPicker
+        files={files}
+        onChange={setFiles}
+        disabled={job.running}
+        hint="Slides (.pptx) or images to add. Each slide and picture is read and placed in the section it belongs to."
+      />
 
       <fieldset className="modes" disabled={job.running}>
         <legend className="label">How should it be added?</legend>
-        <label className="mode">
-          <input type="radio" name="addMode" checked={mode === "new"} onChange={() => setMode("new")} />
-          <span>
-            <strong>As new section(s)</strong>
-            <small>New sections go after the existing ones, each with its own subheading.</small>
-          </span>
-        </label>
-        <label className="mode">
-          <input type="radio" name="addMode" checked={mode === "continue"} onChange={() => setMode("continue")} />
-          <span>
-            <strong>Continue an existing section</strong>
-            <small>The new material is added to the end of the section you pick. What's already there is kept.</small>
-          </span>
-        </label>
-        <select className="input sec-select" aria-label="Section to continue" value={sectionId} disabled={mode !== "continue"} onChange={(e) => setSectionId(e.target.value)}>
-          {note.sections.map((s, i) => (
-            <option key={s.id} value={s.id}>
-              {i + 1}. {s.heading}
-            </option>
-          ))}
-        </select>
-        <label className="mode">
-          <input type="radio" name="addMode" checked={mode === "rebuild"} onChange={() => setMode("rebuild")} />
-          <span>
-            <strong>Rebuild all notes</strong>
-            <small>Regenerates every section from the full transcript with the new part added. This replaces the current notes.</small>
-          </span>
-        </label>
+        {MODES.map((m) => (
+          <div key={m.mode} className="mode-wrap">
+            <label className="mode">
+              <input type="radio" name="addMode" checked={mode === m.mode} onChange={() => setMode(m.mode)} />
+              <span>
+                <strong>{m.title}</strong>
+                <small>{m.body}</small>
+              </span>
+            </label>
+            {m.mode === "continue" && (
+              <select className="input sec-select" aria-label="Section to continue" value={sectionId} disabled={mode !== "continue"} onChange={(e) => setSectionId(e.target.value)}>
+                {note.sections.map((s, i) => (
+                  <option key={s.id} value={s.id}>
+                    {i + 1}. {s.heading}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        ))}
       </fieldset>
 
       <div className="gen-row">
@@ -127,7 +157,7 @@ export function AddPanel({
           <button type="button" className="btn" onClick={saveTranscript} disabled={fullTx === note.transcript}>
             Save transcript
           </button>
-          <span className="msg">{txMsg || 'Saving changes the stored transcript only. Choose "Rebuild all notes" to update the notes from it.'}</span>
+          <span className="msg">{txMsg || 'Saving changes the stored transcript only. Choose "Regenerate everything from scratch" to update the notes from it.'}</span>
         </div>
       </details>
     </section>

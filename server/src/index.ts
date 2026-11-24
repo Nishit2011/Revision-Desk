@@ -4,6 +4,7 @@ import express from "express";
 import { config } from "./config.ts";
 import { notesRouter } from "./routes/notes.ts";
 import { closePdfBrowser } from "./pdf.ts";
+import { assetsRepo } from "./db.ts";
 
 const app = express();
 app.disable("x-powered-by");
@@ -13,6 +14,14 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: config.model, effort: config.effort });
 });
 app.use("/api/notes", notesRouter);
+
+/** Images extracted from uploaded slides and pictures. */
+app.get("/api/assets/:id", (req, res) => {
+  const asset = assetsRepo.get(req.params.id);
+  if (!asset) return void res.status(404).end();
+  res.set({ "Content-Type": asset.mime, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" });
+  res.end(Buffer.from(asset.data));
+});
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found" });
 });

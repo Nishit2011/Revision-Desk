@@ -17,7 +17,40 @@ db.exec(`
     body          TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS notes_created_at ON notes (created_at DESC);
+  CREATE TABLE IF NOT EXISTS assets (
+    id         TEXT PRIMARY KEY,
+    note_id    TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    data       BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assets_note ON assets (note_id);
 `);
+
+const assetGetStmt = db.prepare("SELECT mime, data FROM assets WHERE id = ?");
+const assetInsertStmt = db.prepare("INSERT OR IGNORE INTO assets (id, note_id, mime, data, created_at) VALUES (?, ?, ?, ?, ?)");
+const assetDeleteForNoteStmt = db.prepare("DELETE FROM assets WHERE note_id = ?");
+
+export const assetsRepo = {
+  get(id: string): { mime: string; data: Uint8Array } | null {
+    const row = assetGetStmt.get(id);
+    return row ? { mime: String(row.mime), data: row.data as Uint8Array } : null;
+  },
+};
+
+/** Save a note and any new images in one transaction, so a failure never leaves half a save. */
+export function saveNoteWithAssets(note: Note, assets: { id: string; mime: string; data: Buffer }[]) {
+  db.exec("BEGIN");
+  try {
+    const now = Date.now();
+    for (const a of assets) assetInsertStmt.run(a.id, note.id, a.mime, a.data, now);
+    notesRepo.save(note);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
 
 const listStmt = db.prepare(
   "SELECT id, title, section_count, created_at, updated_at FROM notes ORDER BY created_at DESC",
@@ -56,6 +89,7 @@ export const notesRepo = {
   },
 
   remove(id: string): boolean {
+    assetDeleteForNoteStmt.run(id);
     return Number(deleteStmt.run(id).changes) > 0;
   },
 };

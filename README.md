@@ -5,13 +5,15 @@ Turn a lecture, class, podcast or meeting transcript into plain-language revisio
 ## Features
 
 - **Paste or upload** a transcript (`.txt`, `.md`, `.vtt`, `.srt`). Caption timestamps and cue numbers are stripped.
+- **Slides and images for extra context:** upload PowerPoint decks (`.pptx`) and images (PNG, JPG, WebP, GIF), such as whiteboard photos. Slide text, speaker notes and pictures are read by Claude, worked into the right sections, and useful pictures appear in those sections with captions. Notes can also be made from slides and images alone. Logos and template art repeated across slides are left out.
 - **Notes for every transcript:** a heading title, subtitle and "big idea", then sections, each with a subheading, an explanation (key terms highlighted), a diagram, key points, an everyday example and a one-line "Remember". The notes end with a glossary and a quiz.
 - **Diagrams** in four kinds, drawn as SVG: process (flow), cycle, breakdown (hierarchy) and comparison.
 - **Sidebar** of every transcript processed, with rename and delete.
-- **Add to transcript** without regenerating everything:
-  - **New section(s):** only the new content becomes new sections after the existing ones.
-  - **Continue a section:** the new content is added to the end of a section you pick.
-  - **Rebuild all notes:** regenerates everything from the full transcript, only when you choose it.
+- **Add transcript, slides or images** to existing notes without regenerating everything:
+  - **Place it where it fits (default):** the agents put each piece of added text, each slide and each image into the section it belongs in, and create new sections only for material no section covers.
+  - **New section(s):** everything added becomes new sections after the existing ones.
+  - **Continue a section:** everything added goes to the end of a section you pick.
+  - **Regenerate everything from scratch:** rebuilds all notes from the full transcript and every upload, only when you choose it.
 - **Edit the stored transcript** directly.
 - **Export to PDF:** A4, selectable text, diagrams included, page numbers.
 - Live progress while the agents work, with Cancel.
@@ -22,6 +24,7 @@ Turn a lecture, class, podcast or meeting transcript into plain-language revisio
 revision-desk/
 ├── shared/   Types and Zod schemas, SVG diagram renderer, transcript cleaning (used by server and web)
 ├── server/   Express API, SQLite storage, Claude agents, PDF export
+│   ├── src/materials.ts  unpacks .pptx decks (slide order, text, notes, pictures) and resizes images
 │   └── src/agents/
 │       ├── llm.ts                 runAgent(): one structured-output Claude call, prompt caching, error mapping
 │       ├── outlineAgent.ts        plans title, big idea and sections (and new sections for added content)
@@ -29,6 +32,8 @@ revision-desk/
 │       ├── diagramAgent.ts        picks and designs a diagram for a section (or updates one)
 │       ├── studyAidsAgent.ts      glossary and quiz
 │       ├── continueAgent.ts       extends one existing section with new content
+│       ├── materialReaderAgent.ts reads each slide and image (picture, slide text, speaker notes)
+│       ├── placementAgent.ts      decides which section each slide, image or added text belongs to
 │       └── orchestrator.ts        createNotes() and extendNotes(): the workflows that run the agents
 └── web/      React + Vite frontend
 ```
@@ -41,10 +46,11 @@ transcript ─▶ Outline agent ─▶ ┬─ Section writer ─▶ Diagram agen
                                └─ …  (in parallel)                 ┘
 ```
 
-- **New notes:** outline → section writers and diagram agents in parallel → study aids.
+- **New notes:** material reader (if slides or images were uploaded) → outline → placement (match slides and images to the planned sections) → section writers and diagram agents in parallel, each given its section's slides and images → study aids.
+- **Place it where it fits:** the material reader reads the new slides and images, then the placement agent assigns each one, and the added text, to an existing section or to "new". Each existing section that receives material is extended by the continue agent (its diagram is updated if needed, and the chosen pictures are added). Material marked "new" gets new sections. Nothing else changes.
 - **Add as new sections:** the outline agent plans sections for the new content only, given the existing headings; then writers, diagrams and study aids run for those sections alone.
 - **Continue a section:** the continue agent writes only what the new content adds. The diagram agent decides whether the section's diagram should change. Study aids adds terms and questions for the new material.
-- **Rebuild:** the full pipeline runs over the stored transcript plus the new content.
+- **Regenerate everything:** the full pipeline runs over the stored transcript, the new content, and every slide and image ever uploaded. Slides already read are not read again.
 
 Each agent is one Claude call with **structured outputs** (Zod schemas), so every response is valid JSON in the expected shape. The transcript sits in a cached system prompt, so the section writers reuse the cache written by the outline agent. Progress streams to the browser as Server-Sent Events. Cancelling aborts the running agents, and nothing is saved.
 
@@ -56,11 +62,12 @@ These "agents" are a code-orchestrated workflow on the Claude Messages API. The 
 | --- | --- | --- |
 | `GET` | `/api/notes` | List saved notes (sidebar) |
 | `GET` | `/api/notes/:id` | Get one note |
-| `POST` | `/api/notes` | Make notes from `{ transcript, title?, sourceName? }`. Streams progress (SSE). |
-| `POST` | `/api/notes/:id/extend` | `{ mode: "new" \| "continue" \| "rebuild", content, sectionId? }`. Streams progress (SSE). |
+| `POST` | `/api/notes` | Multipart form: `transcript`, `title?`, `sourceName?` and up to 10 `files` (.pptx or images, 50 MB each). Streams progress (SSE). |
+| `POST` | `/api/notes/:id/extend` | Multipart form: `mode` (`auto`, `new`, `continue` or `rebuild`), `content`, `sectionId?` and `files`. Streams progress (SSE). |
 | `PATCH` | `/api/notes/:id` | Rename or edit the stored transcript: `{ title?, transcript? }` |
 | `DELETE` | `/api/notes/:id` | Delete notes |
-| `GET` | `/api/notes/:id/pdf` | Download the notes as a PDF |
+| `GET` | `/api/notes/:id/pdf` | Download the notes as a PDF, including placed pictures |
+| `GET` | `/api/assets/:id` | An image extracted from uploaded slides or pictures |
 | `GET` | `/api/health` | Health check, plus the model and effort in use |
 
 ## Getting started

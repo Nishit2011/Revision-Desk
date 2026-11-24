@@ -147,3 +147,25 @@ figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; display: fle
   .main { padding-top: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .side { transition: none; } }
+
+/* Slides & images */
+.attach { border: 1.5px dashed var(--line); border-radius: 14px; background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.attach.over { border-color: var(--accent); background: var(--accent-soft); }
+.attach-head { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.attach-head > div { min-width: 0; flex: 1 1 260px; }
+.attach-head .msg { margin-top: 2px; }
+.btn.is-disabled { opacity: .55; pointer-events: none; }
+.attach-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.attach-list li { display: flex; align-items: baseline; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--sunk); font-size: 14px; min-width: 0; }
+.attach-list .kind { flex: none; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); }
+.attach-list .name { min-width: 0; overflow-wrap: anywhere; flex: 1; }
+.attach-list .size { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.mode-wrap { display: flex; flex-direction: column; gap: 8px; }
+.sources { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 2px 0 0; }
+.source-chip { font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: var(--surface); overflow-wrap: anywhere; }
+.figures { display: grid; gap: 14px; }
+.figures.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.photo { margin: 0; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.photo img { display: block; width: 100%; max-height: 460px; object-fit: contain; border-radius: 8px; background: var(--sunk); }
+.photo figcaption { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.photo figcaption .src { font-size: 12px; color: var(--muted); }

@@ -2,21 +2,23 @@ import { useState } from "react";
 import type { Note } from "@revision-desk/shared";
 import { api } from "../api.ts";
 import { useJob } from "../useJob.ts";
+import { AttachmentPicker } from "./AttachmentPicker.tsx";
 import { ProgressPanel } from "./ProgressPanel.tsx";
 import { TranscriptInput } from "./TranscriptInput.tsx";
 import { SAMPLE_TRANSCRIPT } from "../sample.ts";
 
-export function Composer({ onCreated }: { onCreated: (note: Note) => void }) {
+export function Composer({ onCreated }: { onCreated: (note: Note, warnings: string[]) => void }) {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [sourceName, setSourceName] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const { state: job, run, cancel } = useJob();
 
   async function generate() {
     const done = await run((onEvent, signal) =>
-      api.createNotes({ transcript: text, title: title.trim() || undefined, sourceName: sourceName || undefined }, onEvent, signal),
+      api.createNotes({ transcript: text, title: title.trim() || undefined, sourceName: sourceName || undefined }, files, onEvent, signal),
     );
-    if (done) onCreated(done.note);
+    if (done) onCreated(done.note, done.warnings ?? []);
   }
 
   return (
@@ -24,8 +26,9 @@ export function Composer({ onCreated }: { onCreated: (note: Note) => void }) {
       <div className="eyebrow">New notes</div>
       <h1>Turn a transcript into revision notes</h1>
       <p className="lede">
-        Paste a lecture, class, podcast or meeting transcript, or upload a text file. A team of Claude agents plans the sections, writes
-        plain-language explanations with examples, draws diagrams, and adds key terms and self-check questions.
+        Paste a lecture, class, podcast or meeting transcript, or upload a text file. Add the lecture slides or photos of the board for more
+        context. A team of Claude agents plans the sections, writes plain-language explanations with examples, places your slides and
+        pictures where they belong, draws diagrams, and adds key terms and self-check questions.
       </p>
       <div className="field">
         <label htmlFor="titleIn">
@@ -48,8 +51,14 @@ export function Composer({ onCreated }: { onCreated: (note: Note) => void }) {
           }
         />
       </div>
+      <AttachmentPicker
+        files={files}
+        onChange={setFiles}
+        disabled={job.running}
+        hint="Upload the lecture slides (.pptx) or images such as whiteboard photos and diagrams. Their content is worked into the notes, and useful pictures appear in the right sections."
+      />
       <div className="gen-row">
-        <button type="button" className="btn primary big" disabled={job.running || !text.trim()} onClick={generate}>
+        <button type="button" className="btn primary big" disabled={job.running || (!text.trim() && !files.length)} onClick={generate}>
           Make revision notes
         </button>
         {job.error && <span className="msg err">{job.error}</span>}

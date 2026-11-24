@@ -20,7 +20,7 @@ export function continueAgent(newContent: string, section: Section, noteTitle: s
     context: newContent,
     schema: Continuation,
     signal,
-    task: `You are the CONTINUE agent. The source material is NEW transcript content that continues one section of existing revision notes.
+    task: `You are the CONTINUE agent. The source material is NEW material for one section of existing revision notes: more transcript text, and/or descriptions of slides and images the student uploaded.
 
 Notes: "${noteTitle}"
 The existing section:
