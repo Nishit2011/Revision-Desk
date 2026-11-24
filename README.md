@@ -1,30 +1,106 @@
 # Revision Desk
 
-Turn a lecture, class, podcast or meeting transcript into plain-language revision notes: a heading title, a subheading per section, explanations, key points, everyday examples, diagrams, key terms and self-check questions.
+Turn a lecture, class, podcast or meeting transcript into plain-language revision notes. A team of Claude agents plans the sections, writes explanations with examples, draws diagrams, and adds key terms and self-check questions. Notes are saved, listed in a sidebar, can be extended with more transcript later, and export to PDF.
 
 ## Features
 
-- **Paste or upload** a transcript (`.txt`, `.md`, `.vtt`, `.srt`). Timestamps and caption numbering are stripped automatically.
-- **Generated notes**: title and subtitle, "big idea" summary, sections with explanations (key terms highlighted), key points, examples, a one-line "Remember", glossary and quiz.
-- **Diagrams** drawn as SVG in four kinds: process (flow), cycle, breakdown (hierarchy) and comparison.
-- **Sidebar** listing every transcript you've processed, with rename and delete.
+- **Paste or upload** a transcript (`.txt`, `.md`, `.vtt`, `.srt`). Caption timestamps and cue numbers are stripped.
+- **Notes for every transcript:** a heading title, subtitle and "big idea", then sections, each with a subheading, an explanation (key terms highlighted), a diagram, key points, an everyday example and a one-line "Remember". The notes end with a glossary and a quiz.
+- **Diagrams** in four kinds, drawn as SVG: process (flow), cycle, breakdown (hierarchy) and comparison.
+- **Sidebar** of every transcript processed, with rename and delete.
 - **Add to transcript** without regenerating everything:
-  - as new section(s) after the existing ones,
-  - as a continuation of an existing section,
-  - or, only when chosen, rebuild all notes from the full transcript.
-- **Edit the stored transcript** in place.
-- **Export to PDF** (A4, light theme, diagrams and quiz answers included).
+  - **New section(s):** only the new content becomes new sections after the existing ones.
+  - **Continue a section:** the new content is added to the end of a section you pick.
+  - **Rebuild all notes:** regenerates everything from the full transcript, only when you choose it.
+- **Edit the stored transcript** directly.
+- **Export to PDF:** A4, selectable text, diagrams included, page numbers.
+- Live progress while the agents work, with Cancel.
 
-## How it runs
+## Architecture
 
-`index.html` is a single self-contained page built to run as a [Claude artifact](https://claude.ai). It uses the artifact runtime capabilities:
+```
+revision-desk/
+├── shared/   Types and Zod schemas, SVG diagram renderer, transcript cleaning (used by server and web)
+├── server/   Express API, SQLite storage, Claude agents, PDF export
+│   └── src/agents/
+│       ├── llm.ts                 runAgent(): one structured-output Claude call, prompt caching, error mapping
+│       ├── outlineAgent.ts        plans title, big idea and sections (and new sections for added content)
+│       ├── sectionWriterAgent.ts  writes one section: explanation, key points, example, takeaway
+│       ├── diagramAgent.ts        picks and designs a diagram for a section (or updates one)
+│       ├── studyAidsAgent.ts      glossary and quiz
+│       ├── continueAgent.ts       extends one existing section with new content
+│       └── orchestrator.ts        createNotes() and extendNotes(): the workflows that run the agents
+└── web/      React + Vite frontend
+```
 
-| Capability | Used for |
+### How the agents work together
+
+```
+transcript ─▶ Outline agent ─▶ ┬─ Section writer ─▶ Diagram agent ─┐
+                               ├─ Section writer ─▶ Diagram agent ─┼─▶ Study aids agent ─▶ saved note
+                               └─ …  (in parallel)                 ┘
+```
+
+- **New notes:** outline → section writers and diagram agents in parallel → study aids.
+- **Add as new sections:** the outline agent plans sections for the new content only, given the existing headings; then writers, diagrams and study aids run for those sections alone.
+- **Continue a section:** the continue agent writes only what the new content adds. The diagram agent decides whether the section's diagram should change. Study aids adds terms and questions for the new material.
+- **Rebuild:** the full pipeline runs over the stored transcript plus the new content.
+
+Each agent is one Claude call with **structured outputs** (Zod schemas), so every response is valid JSON in the expected shape. The transcript sits in a cached system prompt, so the section writers reuse the cache written by the outline agent. Progress streams to the browser as Server-Sent Events. Cancelling aborts the running agents, and nothing is saved.
+
+These "agents" are a code-orchestrated workflow on the Claude Messages API. The app decides the steps, and each agent has one job. That keeps runs predictable and cheap. No hosted agent loop or sandbox is needed.
+
+### API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/notes` | List saved notes (sidebar) |
+| `GET` | `/api/notes/:id` | Get one note |
+| `POST` | `/api/notes` | Make notes from `{ transcript, title?, sourceName? }`. Streams progress (SSE). |
+| `POST` | `/api/notes/:id/extend` | `{ mode: "new" \| "continue" \| "rebuild", content, sectionId? }`. Streams progress (SSE). |
+| `PATCH` | `/api/notes/:id` | Rename or edit the stored transcript: `{ title?, transcript? }` |
+| `DELETE` | `/api/notes/:id` | Delete notes |
+| `GET` | `/api/notes/:id/pdf` | Download the notes as a PDF |
+| `GET` | `/api/health` | Health check, plus the model and effort in use |
+
+## Getting started
+
+Requirements: **Node.js 22.13 or later** (for the built-in `node:sqlite`) and an Anthropic API key.
+
+```bash
+npm install
+cp .env.example .env      # then set ANTHROPIC_API_KEY
+npm run dev               # API on :8787, web app on http://localhost:5173
+```
+
+Production:
+
+```bash
+npm run build             # builds web/dist
+npm start                 # serves the API and the built app on :8787
+```
+
+`npm install` also downloads Chrome for Puppeteer, which renders the PDFs. If that download was skipped, run `npx puppeteer browsers install chrome`.
+
+### Configuration (`.env`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | none | API key. You can leave it unset after running `ant auth login`. |
+| `CLAUDE_MODEL` | `claude-opus-5-5` | Model for all agents |
+| `CLAUDE_EFFORT` | `medium` | Effort for the writing agents: `low`, `medium`, `high`, `xhigh` or `max`. The study-aids agent always uses `low`. |
+| `AGENT_CONCURRENCY` | `4` | How many section writers run at once |
+| `MAX_TRANSCRIPT_CHARS` | `600000` | Longer transcripts are rejected with a message asking to split them |
+| `PORT` | `8787` | Server port |
+| `DATABASE_PATH` | `./data/revision-desk.db` | SQLite file |
+
+Requests use server-side refusal fallbacks (`fallbacks: "default"`). If the model declines a request, the API retries it on a fallback model automatically.
+
+## Scripts
+
+| Command | What it does |
 | --- | --- |
-| `sample` | Asking Claude to write the notes |
-| `db` + `user` | Saving notes privately to the viewer's account |
-| `downloads` | Saving the exported PDF |
-
-Outside a Claude artifact viewer, the page still opens and shows the built-in example notes, but generating notes and exporting are unavailable, and notes fall back to browser storage.
-
-PDF export loads [html2canvas](https://html2canvas.hertzen.com/) 1.4.1 and [jsPDF](https://github.com/parallax/jsPDF) 2.5.1 from cdnjs on demand.
+| `npm run dev` | Run the API (with reload) and the Vite dev server together |
+| `npm run build` | Type-check and build the web app |
+| `npm start` | Run the API and serve the built app |
+| `npm run typecheck` | Type-check `shared`, `server` and `web` |
